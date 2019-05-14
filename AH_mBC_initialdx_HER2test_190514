@@ -1,0 +1,47 @@
+-- Amy Hong, May 2019
+-- This script generates a table with 4 columns for q_uuid, patient_id, diagnosis_date, and testing_date
+-- for breast cancer patients who received HER2 testing
+
+-- vw_cancer: condition_concept_canonical_code
+-- -> for breast cancer, '372095001','372064008','254837009'
+
+-- vw_sequencing: observation_concept_canonical_code
+-- -> for HER2, 'HGNC:3430' (ERBB2)
+-- -> for HR, 'HGNC:8910' (PGR), 'HGNC:3467' (ESR1), 'HGNC:3443' (EREG)
+
+SET SEARCH_PATH = clinical_mart_v1_2;
+DROP TABLE IF EXISTS #dx_date;
+DROP TABLE IF EXISTS #prot_test;
+CREATE TABLE #dx_date AS (
+    SELECT DISTINCT q_uuid, patient_id, to_date(onset_date_time,'YYYY-MM-DD') AS diagnosis_date --7605
+    FROM clinical_mart_v1_2.vw_cancer
+    /* ↓ insert appropriate condition codes in the parentheses to change cancer type ↓ */
+    WHERE condition_concept_canonical_code IN ('372095001','372064008','254837009')
+    /* ↓ insert primary/additional ↓ */
+    AND clinical_status = 'primary'
+    AND onset_date_time IS NOT NULL
+    AND q_uuid IS NOT NULL
+    AND patient_id IS NOT NULL
+    GROUP BY q_uuid, patient_id, diagnosis_date
+    HAVING diagnosis_date > '1000-01-01'
+);
+CREATE TABLE #prot_test AS (
+    SELECT q_uuid, patient_id, sequence_id, to_date(sequencing_date,'YYYY-MM-DD') AS testing_date --6139
+    FROM clinical_mart_v1_2.vw_sequencing
+    /* ↓ insert appropriate observation codes in the parentheses to change protein type ↓ */
+    WHERE observation_concept_canonical_code IN ('HGNC:3430')
+    AND sequencing_date IS NOT NULL
+    AND q_uuid IS NOT NULL
+    AND patient_id IS NOT NULL
+    AND observation_concept_canonical_code IS NOT NULL
+    AND interpretation_canonical_code IS NOT NULL
+    GROUP BY q_uuid, patient_id, sequencing_date, sequence_id
+    HAVING testing_date > '1000-01-01'
+);
+SELECT #dx_date.q_uuid, #dx_date.patient_id, #dx_date.diagnosis_date, #prot_test.testing_date, #prot_test.sequence_id FROM #dx_date --5768
+JOIN #prot_test
+ON #dx_date.q_uuid = #prot_test.q_uuid
+GROUP BY #dx_date.q_uuid, #dx_date.patient_id, #dx_date.diagnosis_date, #prot_test.testing_date, #prot_test.sequence_id
+ORDER BY #dx_date.q_uuid, #prot_test.testing_date;
+
+-- export output to Excel, then calculate difference between diagnosis_date and testing_date
